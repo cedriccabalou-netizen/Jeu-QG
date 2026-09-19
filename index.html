@@ -57,6 +57,12 @@
   .card p{line-height:1.55;color:var(--text);white-space:pre-wrap;margin:0;}
   .muted{color:var(--text-dim);font-size:0.88rem;}
 
+  .phase-tag{display:inline-block;font-size:0.72rem;font-weight:700;padding:4px 10px;border-radius:20px;
+    margin-bottom:10px;letter-spacing:0.03em;}
+  .phase-tag.before{background:rgba(155,127,212,0.18);color:var(--violet);}
+  .phase-tag.during{background:rgba(76,175,109,0.18);color:var(--vert);}
+  .phase-tag.after{background:rgba(232,135,58,0.18);color:var(--orange);}
+
   .countdown-wrap{text-align:center;padding:10px 10px 4px;}
   .countdown{display:flex;justify-content:center;gap:12px;}
   .countdown .unit{min-width:58px;}
@@ -68,6 +74,8 @@
   .rank-body{flex:1;}
   .rank-top{display:flex;justify-content:space-between;margin-bottom:6px;font-weight:600;}
   .rank-score{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;}
+  .bar-track{background:var(--surface-2);border-radius:6px;height:13px;overflow:hidden;}
+  .bar-fill{height:100%;border-radius:6px;transition:width .4s ease;}
 
   .team-card{border:1px solid var(--border);border-left:6px solid var(--team-color,var(--gold));
     background:var(--surface);border-radius:8px;padding:14px 16px;margin-bottom:12px;}
@@ -84,27 +92,32 @@
   .history-item{display:flex;justify-content:space-between;gap:8px;font-size:0.8rem;color:var(--text-dim);
     padding:7px 0;border-bottom:1px solid var(--border);}
   .history-item:last-child{border-bottom:none;}
+  .history-item .h-team{font-weight:600;}
 
-  .defi-row{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;
+  .defi-row,.chal-row{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;
     background:var(--surface-2);}
-  .defi-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+  .defi-top,.chal-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
   .badge{font-size:0.68rem;font-weight:700;padding:3px 9px;border-radius:20px;letter-spacing:0.02em;white-space:nowrap;}
   .badge.facile{background:rgba(76,175,109,0.18);color:var(--vert);}
   .badge.moyen{background:rgba(232,197,71,0.18);color:var(--gold);}
   .badge.difficile{background:rgba(232,135,58,0.18);color:var(--orange);}
   .badge.done{background:rgba(255,255,255,0.08);color:var(--text-dim);}
-  .defi-pts{font-family:'Bebas Neue',sans-serif;font-size:1.15rem;color:var(--gold);}
-  .defi-status{font-size:0.78rem;margin-top:6px;color:var(--text-dim);}
+  .defi-pts,.chal-pts{font-family:'Bebas Neue',sans-serif;font-size:1.15rem;color:var(--gold);}
+  .defi-status,.chal-status{font-size:0.78rem;margin-top:6px;color:var(--text-dim);}
+  .chal-desc{font-size:0.85rem;margin-top:6px;line-height:1.4;}
+
+  .race-card{border-color:var(--gold);}
 
   label{display:block;font-size:0.83rem;color:var(--text-dim);margin:12px 0 6px;}
   input[type="datetime-local"],input[type="text"],input[type="number"],input[type="password"],select,textarea{
     width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;
     padding:9px 11px;font-family:'Work Sans',sans-serif;font-size:0.88rem;}
-  textarea{min-height:110px;resize:vertical;line-height:1.5;}
+  textarea{min-height:130px;resize:vertical;line-height:1.5;}
   .save-btn{margin-top:14px;background:var(--gold);color:#1B1E27;border:none;padding:10px 18px;border-radius:6px;
     font-weight:700;font-size:0.88rem;cursor:pointer;}
   .save-btn.danger{background:var(--red);color:#fff;}
   .status-msg{margin-top:10px;font-size:0.83rem;}
+  .status-msg.ok{color:var(--vert);}
   .status-msg.err{color:var(--red);}
 
   .loading{text-align:center;color:var(--text-dim);padding:40px 0;}
@@ -125,9 +138,12 @@
   .modal-box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px;
     max-width:320px;width:100%;}
   .modal-box h3{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--gold);margin:0 0 6px;}
+  .modal-box .muted{margin-bottom:12px;display:block;}
 
   .field-row{display:flex;gap:8px;align-items:center;}
-  .field-row select{flex:0 0 120px;}
+  .field-row select{flex:0 0 150px;}
+  .field-row input[type="text"]{flex:1;}
+  .field-row input[type="number"]{flex:0 0 70px;}
   .checkbox-group{display:flex;gap:12px;margin-top:8px;}
   .checkbox-group label{margin:0;display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text);}
 </style>
@@ -144,6 +160,7 @@
     <button class="tab-btn active" data-tab="accueil">Accueil</button>
     <button class="tab-btn" data-tab="classement">Classement</button>
     <button class="tab-btn" data-tab="defis">D&eacute;fis</button>
+    <button class="tab-btn" data-tab="challenge">Challenge</button>
   </nav>
 
   <main>
@@ -151,7 +168,7 @@
 
     <div class="card" id="team-gate-card" style="display:none;">
       <h2>Rejoins ton &eacute;quipe</h2>
-      <p class="muted" style="margin-bottom:10px;">Entre le code de ton &eacute;quipe pour accéder au jeu.</p>
+      <p class="muted" style="margin-bottom:10px;">Entre le code de ton &eacute;quipe pour voir le classement, les d&eacute;fis et les challenges. Tu ne verras jamais les informations des autres &eacute;quipes, seulement ton classement par rapport &agrave; elles.</p>
       <div class="field-row" style="margin-bottom:8px;">
         <select id="gate-team-select">
           <option value="vert">Vert</option>
@@ -166,7 +183,6 @@
 
     <section class="panel active" id="panel-accueil">
       <div class="card countdown-wrap" id="countdown-card">
-        <h2>Début de l'évènement</h2>
         <div id="countdown-body"></div>
       </div>
       <div class="card">
@@ -177,11 +193,16 @@
 
     <section class="panel" id="panel-classement">
       <div class="card">
-        <h2>Classement Général</h2>
+        <h2>Votre &eacute;quipe</h2>
+        <div id="teams-list"></div>
+      </div>
+      <div class="card">
+        <h2>Classement</h2>
+        <p class="muted" style="margin-bottom:10px;">Vous voyez votre position et celle des autres, mais pas leur score exact.</p>
         <div id="rank-list"></div>
       </div>
       <div class="card">
-        <h2>Historique des points</h2>
+        <h2>Vos derniers points</h2>
         <div id="history-list"></div>
       </div>
     </section>
@@ -191,6 +212,18 @@
         <h2>50 d&eacute;fis</h2>
         <p class="muted" style="margin-bottom:14px;">Facile = 10 pts &middot; Moyen = 20 pts &middot; Difficile = 40 pts</p>
         <div id="defis-list"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-challenge">
+      <div id="race-section"></div>
+      <div class="card">
+        <h2>Challenges</h2>
+        <div id="challenges-list"></div>
+      </div>
+      <div class="card">
+        <h2>Manches pass&eacute;es</h2>
+        <div id="race-history-list"></div>
       </div>
     </section>
   </main>
@@ -206,6 +239,7 @@
     <nav class="tabs" id="mj-tabs">
       <button class="tab-btn active" data-mjtab="points">Points</button>
       <button class="tab-btn" data-mjtab="defis">D&eacute;fis</button>
+      <button class="tab-btn" data-mjtab="challenges">Challenges</button>
       <button class="tab-btn" data-mjtab="reglages">R&eacute;glages</button>
     </nav>
     <main>
@@ -219,10 +253,40 @@
 
       <section class="panel" id="mjpanel-defis">
         <div class="card">
-          <h2>Valider les défis par équipe</h2>
-          <p class="muted">Coche les équipes ayant réalisé chaque défi :</p>
+          <p class="muted">Modifie le titre, les points ou la difficult&eacute;, et coche chaque &eacute;quipe au fur et &agrave; mesure qu'elle r&eacute;alise le d&eacute;fi.</p>
         </div>
         <div id="mj-defis-list"></div>
+      </section>
+
+      <section class="panel" id="mjpanel-challenges">
+        <div class="card race-card">
+          <h2>Manche photo (WhatsApp)</h2>
+          <p class="muted">Lance une manche maintenant, ou programme-la pour qu'elle apparaisse au meme instant pour toutes les equipes.</p>
+          <label for="race-object">Objet demande</label>
+          <input type="text" id="race-object" placeholder="Ex : une chaussette rouge">
+          <label for="race-schedule">Programmer pour plus tard (optionnel)</label>
+          <input type="datetime-local" id="race-schedule">
+          <button class="save-btn" id="race-launch-btn">Lancer / programmer</button>
+          <div id="mj-race-status" style="margin-top:14px;"></div>
+        </div>
+        <div class="card">
+          <h2>Historique des manches</h2>
+          <div id="mj-race-history-list"></div>
+        </div>
+        <div class="card">
+          <h2>Ajouter un challenge</h2>
+          <label for="chal-title">Titre</label>
+          <input type="text" id="chal-title" placeholder="Nom du mini-jeu">
+          <label for="chal-desc">Description</label>
+          <textarea id="chal-desc" placeholder="Explique le principe du challenge..." style="min-height:80px;"></textarea>
+          <label for="chal-points">Points</label>
+          <input type="number" id="chal-points" value="20">
+          <label for="chal-reveal">Date/heure d'apparition</label>
+          <input type="datetime-local" id="chal-reveal">
+          <button class="save-btn" id="chal-add-btn">Ajouter le challenge</button>
+          <div class="status-msg" id="chal-add-status"></div>
+        </div>
+        <div id="mj-challenges-list"></div>
       </section>
 
       <section class="panel" id="mjpanel-reglages">
@@ -230,9 +294,17 @@
           <h2>Dates & R&egrave;gles</h2>
           <label for="launch-input">D&eacute;but du jeu</label>
           <input type="datetime-local" id="launch-input">
+          <label for="end-input">Fin du jeu</label>
+          <input type="datetime-local" id="end-input">
           <label for="rules-input">R&egrave;gles du jeu</label>
           <textarea id="rules-input"></textarea>
           <button class="save-btn" id="save-settings">Enregistrer</button>
+        </div>
+        <div class="card">
+          <h2>Code maître du jeu</h2>
+          <label for="pin-input">Nouveau code PIN</label>
+          <input type="text" id="pin-input" placeholder="Nouveau code">
+          <button class="save-btn" id="pin-save-btn">Changer le code</button>
         </div>
         <div class="card">
           <h2>Codes d'&eacute;quipe</h2>
@@ -243,6 +315,10 @@
           <label for="code-orange">Code Orange</label>
           <input type="text" id="code-orange">
           <button class="save-btn" id="codes-save-btn">Enregistrer</button>
+        </div>
+        <div class="card">
+          <h2>Réinitialiser la partie</h2>
+          <button class="save-btn danger" id="reset-scores">Réinitialiser tout</button>
         </div>
       </section>
     </main>
@@ -260,6 +336,7 @@
 </div>
 
 <script>
+// CONFIGURATION FIREBASE
 const firebaseConfig = {
   apiKey: "AIzaSyAnbx1faGuD_IjNTaO4-Ap1Gf_jIFWmAig",
   authDomain: "jeu-qg.firebaseapp.com",
@@ -280,24 +357,33 @@ const TEAMS = [
   {id:'violet', name:'Violet', color:'var(--violet)'},
   {id:'orange', name:'Orange', color:'var(--orange)'}
 ];
+const DIFF_POINTS = {facile:10, moyen:20, difficile:40};
+const DIFF_LABEL = {facile:'Facile', moyen:'Moyen', difficile:'Difficile'};
 
-function generateDefaultDefis() {
-  const list = [];
-  let id = 1;
-  for(let i=1; i<=20; i++) list.push({id:'d'+id++, title:`Défi Facile #${i}`, diff:'facile', pts:10, done:{vert:false, violet:false, orange:false}});
-  for(let i=1; i<=20; i++) list.push({id:'d'+id++, title:`Défi Moyen #${i}`, diff:'moyen', pts:20, done:{vert:false, violet:false, orange:false}});
-  for(let i=1; i<=10; i++) list.push({id:'d'+id++, title:`Défi Difficile #${i}`, diff:'difficile', pts:40, done:{vert:false, violet:false, orange:false}});
-  return list;
+function generateDefaultDefis(){
+  const tiers = [{diff:'facile', count:20}, {diff:'moyen', count:20}, {diff:'difficile', count:10}];
+  let defis = []; let n = 1;
+  tiers.forEach(t => {
+    for(let i=1;i<=t.count;i++){
+      defis.push({id:'d'+n, title:'Defi '+DIFF_LABEL[t.diff]+' n°'+i, difficulty:t.diff, points:DIFF_POINTS[t.diff], completedBy:{vert:false, violet:false, orange:false}});
+      n++;
+    }
+  });
+  return defis;
 }
 
 let state = {
   scores: {vert:0, violet:0, orange:0},
   launchTime: '2026-12-30T20:00:00',
+  endTime: '2027-01-02T12:00:00',
   rules: "Bienvenue au Grand Jeu QG !",
   history: [],
   mjPin: '2027',
-  teamCodes: {vert:'VERT', violet:'VIOLET', orange:'ORANGE'},
-  defis: generateDefaultDefis()
+  defis: generateDefaultDefis(),
+  challenges: [],
+  races: [],
+  raceHistory: [],
+  teamCodes: {vert:'VERT2027', violet:'VIOLET2027', orange:'ORANGE2027'}
 };
 
 let myTeam = localStorage.getItem('myTeam') || null;
@@ -306,7 +392,7 @@ stateRef.on('value', (snapshot) => {
   const data = snapshot.val();
   if (data) {
     state = Object.assign({}, state, data);
-    if (!state.defis) state.defis = generateDefaultDefis();
+    if(!state.defis || state.defis.length === 0) state.defis = generateDefaultDefis();
   } else {
     stateRef.set(state);
   }
@@ -314,11 +400,9 @@ stateRef.on('value', (snapshot) => {
   renderAll();
 });
 
-function saveState() {
-  stateRef.set(state);
-}
+function saveState(){ stateRef.set(state); }
 
-function renderAll() {
+function renderAll(){
   if (!myTeam) {
     document.getElementById('team-gate-card').style.display = 'block';
   } else {
@@ -328,10 +412,11 @@ function renderAll() {
   renderRankings();
   renderDefis();
   renderHistory();
+  renderChallenges();
   updateCountdown();
 }
 
-// Navigation Onglets Joueurs
+// Navigation Onglets
 document.querySelectorAll('#user-tabs button').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('#user-tabs button').forEach(b => b.classList.remove('active'));
@@ -341,7 +426,6 @@ document.querySelectorAll('#user-tabs button').forEach(btn => {
   });
 });
 
-// Navigation Onglets MJ
 document.querySelectorAll('#mj-tabs button').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('#mj-tabs button').forEach(b => b.classList.remove('active'));
@@ -351,35 +435,57 @@ document.querySelectorAll('#mj-tabs button').forEach(btn => {
   });
 });
 
-function renderRankings() {
+function renderRankings(){
   const rankList = document.getElementById('rank-list');
+  const teamsList = document.getElementById('teams-list');
   if(!rankList) return;
-  const sorted = [...TEAMS].sort((a,b) => (state.scores[b.id]||0) - (state.scores[a.id]||0));
   
-  rankList.innerHTML = sorted.map((t, idx) => `
-    <div class="rank-row">
-      <div class="rank-pos">#${idx+1}</div>
-      <div class="rank-body">
-        <div class="rank-top">
-          <span style="color:${t.color}">${t.name}</span>
-          <span class="rank-score">${state.scores[t.id] || 0} pts</span>
+  const sorted = [...TEAMS].sort((a,b) => (state.scores[b.id]||0) - (state.scores[a.id]||0));
+  const maxScore = Math.max(...Object.values(state.scores), 1);
+
+  if(myTeam && teamsList){
+    const teamObj = TEAMS.find(t => t.id === myTeam);
+    teamsList.innerHTML = `
+      <div class="team-card" style="--team-color:${teamObj.color}">
+        <div class="team-head">
+          <span class="team-name">Équipe ${teamObj.name}</span>
+          <span class="team-score">${state.scores[myTeam] || 0} pts</span>
         </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }
+
+  rankList.innerHTML = sorted.map((t, idx) => {
+    const isMe = t.id === myTeam;
+    const scorePct = Math.round(((state.scores[t.id]||0) / maxScore) * 100);
+    return `
+      <div class="rank-row">
+        <div class="rank-pos">#${idx+1}</div>
+        <div class="rank-body">
+          <div class="rank-top">
+            <span style="color:${t.color}">${t.name} ${isMe ? '(Vous)' : ''}</span>
+            <span class="rank-score">${isMe ? (state.scores[t.id] || 0) + ' pts' : '???'}</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill" style="width:${scorePct}%;background:${t.color}"></div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
-function renderDefis() {
+function renderDefis(){
   const container = document.getElementById('defis-list');
   if (!container || !state.defis) return;
   container.innerHTML = state.defis.map(d => {
-    const isDone = myTeam && d.done && d.done[myTeam];
+    const isDone = myTeam && d.completedBy && d.completedBy[myTeam];
     return `
       <div class="defi-row">
         <div class="defi-top">
-          <span class="badge ${d.diff}">${d.diff.toUpperCase()}</span>
+          <span class="badge ${d.difficulty}">${d.difficulty.toUpperCase()}</span>
           <strong>${d.title}</strong>
-          <span class="defi-pts">+${d.pts} pts</span>
+          <span class="defi-pts">+${d.points} pts</span>
         </div>
         <div class="defi-status">${isDone ? '✅ Réalisé par votre équipe' : '⏳ Non réalisé'}</div>
       </div>
@@ -387,23 +493,42 @@ function renderDefis() {
   }).join('');
 }
 
-function renderHistory() {
+function renderHistory(){
   const container = document.getElementById('history-list');
   if (!container) return;
-  const hist = state.history || [];
+  const hist = (state.history || []).filter(h => !myTeam || h.team === myTeam);
   if (hist.length === 0) {
-    container.innerHTML = '<p class="muted">Aucun historique pour le moment.</p>';
+    container.innerHTML = '<p class="muted">Aucun historique pour votre équipe.</p>';
     return;
   }
   container.innerHTML = hist.slice(-10).reverse().map(h => `
     <div class="history-item">
-      <span><strong>${h.team.toUpperCase()}</strong> : ${h.desc}</span>
+      <span>${h.desc}</span>
       <span>${h.date}</span>
     </div>
   `).join('');
 }
 
-function updateCountdown() {
+function renderChallenges(){
+  const container = document.getElementById('challenges-list');
+  if(!container) return;
+  const list = state.challenges || [];
+  if(list.length === 0){
+    container.innerHTML = '<p class="muted">Aucun challenge disponible.</p>';
+    return;
+  }
+  container.innerHTML = list.map(c => `
+    <div class="chal-row">
+      <div class="chal-top">
+        <strong>${c.title}</strong>
+        <span class="chal-pts">+${c.points} pts</span>
+      </div>
+      <p class="chal-desc">${c.description}</p>
+    </div>
+  `).join('');
+}
+
+function updateCountdown(){
   const el = document.getElementById('countdown-body');
   if (!el) return;
   const target = new Date(state.launchTime).getTime();
@@ -411,13 +536,14 @@ function updateCountdown() {
   const diff = target - now;
 
   if (diff <= 0) {
-    el.innerHTML = '<strong style="color:var(--vert);font-size:1.5rem;">LE JEU A COMMENCÉ !</strong>';
+    el.innerHTML = '<span class="phase-tag during">ÉVÈNEMENT EN COURS</span><br><strong style="color:var(--vert);font-size:1.5rem;">LE JEU A COMMENCÉ !</strong>';
     return;
   }
   const h = Math.floor(diff / (1000 * 60 * 60));
   const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
   const s = Math.floor((diff % (1000 * 60)) / 1000);
   el.innerHTML = `
+    <span class="phase-tag before">AVANT L'ÉVÈNEMENT</span>
     <div class="countdown">
       <div class="unit"><div class="num">${h}</div><div class="lbl">HEURES</div></div>
       <div class="unit"><div class="num">${m}</div><div class="lbl">MIN</div></div>
@@ -436,11 +562,11 @@ document.getElementById('gate-join-btn').addEventListener('click', () => {
     localStorage.setItem('myTeam', myTeam);
     renderAll();
   } else {
-    document.getElementById('gate-join-error').textContent = 'Code incorrect';
+    document.getElementById('gate-join-error').textContent = 'Code équipe incorrect';
   }
 });
 
-// Ouverture Espace MJ
+// Espace MJ
 document.getElementById('mj-gear-btn').addEventListener('click', () => {
   document.getElementById('pin-modal').classList.add('open');
 });
@@ -460,7 +586,7 @@ document.getElementById('mj-close-btn').addEventListener('click', () => {
   document.getElementById('mj-overlay').classList.remove('open');
 });
 
-function renderMJ() {
+function renderMJ(){
   const container = document.getElementById('mj-teams-list');
   container.innerHTML = TEAMS.map(t => `
     <div class="team-card" style="--team-color:${t.color}">
@@ -476,8 +602,8 @@ function renderMJ() {
     </div>
   `).join('');
 
-  // Remplissage formulaires réglages
   document.getElementById('launch-input').value = state.launchTime || '';
+  document.getElementById('end-input').value = state.endTime || '';
   document.getElementById('rules-input').value = state.rules || '';
   document.getElementById('code-vert').value = state.teamCodes.vert || '';
   document.getElementById('code-violet').value = state.teamCodes.violet || '';
@@ -486,19 +612,19 @@ function renderMJ() {
   renderMJDefis();
 }
 
-function renderMJDefis() {
+function renderMJDefis(){
   const container = document.getElementById('mj-defis-list');
   if (!container || !state.defis) return;
   container.innerHTML = state.defis.map((d, idx) => `
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <strong>${d.title} (${d.pts} pts)</strong>
-        <span class="badge ${d.diff}">${d.diff}</span>
+        <strong>${d.title} (${d.points} pts)</strong>
+        <span class="badge ${d.difficulty}">${d.difficulty}</span>
       </div>
       <div class="checkbox-group">
         ${TEAMS.map(t => `
           <label>
-            <input type="checkbox" ${d.done && d.done[t.id] ? 'checked' : ''} onchange="toggleDefi(${idx}, '${t.id}', this.checked)">
+            <input type="checkbox" ${d.completedBy && d.completedBy[t.id] ? 'checked' : ''} onchange="toggleDefi(${idx}, '${t.id}', this.checked)">
             ${t.name}
           </label>
         `).join('')}
@@ -507,19 +633,19 @@ function renderMJDefis() {
   `).join('');
 }
 
-window.toggleDefi = function(index, teamId, isChecked) {
-  if (!state.defis[index].done) state.defis[index].done = {vert:false, violet:false, orange:false};
-  state.defis[index].done[teamId] = isChecked;
-  const pts = state.defis[index].pts;
+window.toggleDefi = function(index, teamId, isChecked){
+  if (!state.defis[index].completedBy) state.defis[index].completedBy = {vert:false, violet:false, orange:false};
+  state.defis[index].completedBy[teamId] = isChecked;
+  const pts = state.defis[index].points;
   
   if (isChecked) {
-    addPoints(teamId, pts, `Défi réussi : ${state.defis[index].title}`);
+    addPoints(teamId, pts, `Défi : ${state.defis[index].title}`);
   } else {
-    addPoints(teamId, -pts, `Annulation défi : ${state.defis[index].title}`);
+    addPoints(teamId, -pts, `Annulation : ${state.defis[index].title}`);
   }
 };
 
-window.addPoints = function(teamId, pts, desc) {
+window.addPoints = function(teamId, pts, desc){
   state.scores[teamId] = (state.scores[teamId] || 0) + pts;
   if (!state.history) state.history = [];
   state.history.push({
@@ -532,9 +658,19 @@ window.addPoints = function(teamId, pts, desc) {
 
 document.getElementById('save-settings').addEventListener('click', () => {
   state.launchTime = document.getElementById('launch-input').value;
+  state.endTime = document.getElementById('end-input').value;
   state.rules = document.getElementById('rules-input').value;
   saveState();
   alert('Réglages enregistrés !');
+});
+
+document.getElementById('pin-save-btn').addEventListener('click', () => {
+  const newPin = document.getElementById('pin-input').value.trim();
+  if(newPin){
+    state.mjPin = newPin;
+    saveState();
+    alert('Nouveau code PIN enregistré !');
+  }
 });
 
 document.getElementById('codes-save-btn').addEventListener('click', () => {
@@ -542,9 +678,20 @@ document.getElementById('codes-save-btn').addEventListener('click', () => {
   state.teamCodes.violet = document.getElementById('code-violet').value.trim();
   state.teamCodes.orange = document.getElementById('code-orange').value.trim();
   saveState();
-  alert('Codes enregistrés !');
+  alert('Codes équipes enregistrés !');
+});
+
+document.getElementById('reset-scores').addEventListener('click', () => {
+  if(confirm("Attention : Cela va remettre tous les scores à zéro et effacer l'historique !")){
+    state.scores = {vert:0, violet:0, orange:0};
+    state.history = [];
+    state.defis = generateDefaultDefis();
+    saveState();
+    alert('Partie réinitialisée.');
+  }
 });
 </script>
 </body>
 </html>
+
 
