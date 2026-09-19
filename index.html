@@ -6,6 +6,11 @@
 <title>Le Grand Jeu QG</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Scripts Firebase (Compat v9) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
 <style>
   :root{
     --bg:#14161C;
@@ -159,7 +164,7 @@
   </nav>
 
   <main>
-    <div id="loading" class="loading">Chargement du jeu...</div>
+    <div id="loading" class="loading">Connexion au serveur Firebase...</div>
 
     <div class="card" id="team-gate-card" style="display:none;">
       <h2>Rejoins ton &eacute;quipe</h2>
@@ -341,7 +346,22 @@
 </div>
 
 <script>
-const STORAGE_KEY = 'jeu-equipes-state';
+// --- CONFIGURATION FIREBASE ---
+const firebaseConfig = {
+  apiKey: "AIzaSyAnbx1faGuD_IjNTaO4-Ap1Gf_jIFWmAig",
+  authDomain: "jeu-qg.firebaseapp.com",
+  databaseURL: "https://jeu-qg-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "jeu-qg",
+  storageBucket: "jeu-qg.firebasestorage.app",
+  messagingSenderId: "1030774437999",
+  appId: "1:1030774437999:web:b3e8abd34193fc08d6359a",
+  measurementId: "G-6CCNGG4F1N"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const stateRef = db.ref('gameState');
+
 const TEAMS = [
   {id:'vert', name:'Vert', color:'var(--vert)'},
   {id:'violet', name:'Violet', color:'var(--violet)'},
@@ -402,8 +422,8 @@ function migrateChallenges(challenges){
 
 let state = {
   scores: {vert:0, violet:0, orange:0},
-  launchTime: '2027-11-12T20:00:00',
-  endTime: '2027-12-12T23:59:00',
+  launchTime: '2026-12-30T20:00:00',
+  endTime: '2027-01-02T12:00:00',
   rules: "Les regles n'ont pas encore ete renseignees par le maitre du jeu.",
   history: [],
   mjPin: '2027',
@@ -419,16 +439,906 @@ let myTeam = null;
 let knownChallengeIds = null;
 let knownActiveRaceIds = null;
 let countdownTimer = null;
+let isFirstLoad = true;
 
-async function loadState(){
+// --- ECOUTE FIREBASE EN TEMPS REEL ---
+stateRef.on('value', (snapshot) => {
+  const data = snapshot.val();
+  if (data) {
+    state = Object.assign({}, state, data);
+    
+    // Migrations sécurisées
+    if(!state.defis || state.defis.length === 0){
+      state.defis = generateDefaultDefis();
+    } else {
+      state.defis = migrateDefis(state.defis);
+    }
+    state.challenges = migrateChallenges(state.challenges || []);
+    if(!Array.isArray(state.raceHistory)) state.raceHistory = [];
+    if(!Array.isArray(state.races)) state.races = [];
+
+  } else {
+    // Si la base est vide (premier lancement), on la crée
+    stateRef.set(state);
+  }
+
+  if(isFirstLoad) {
+    document.getElementById('loading').style.display = 'none';
+    myTeam = localStorage.getItem('myTeam') || null;
+    isFirstLoad = false;
+    checkForAlerts();
+    refreshAllViews();
+  } else {
+    // Évite de rafraîchir l'écran du MJ pendant qu'il tape du texte
+    const active = document.activeElement;
+    const isEditing = active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName);
+    if(!isEditing) {
+      checkForAlerts();
+      refreshAllViews();
+    }
+  }
+});
+
+async function saveState(){
   try{
-    const result = await window.storage.get(STORAGE_KEY, true);
-    if(result && result.value){
-      const parsed = JSON.parse(result.value);
-      state = Object.assign({}, state, parsed);
-      if(!parsed.defis || parsed.defis.length === 0){
-        state.defis = generateDefaultDefis();
-      } else {
-        state.defis = migrateDefis(state.defis);
+    await stateRef.set(state);
+    return true;
+  }catch(e){
+    console.error('Erreur de sauvegarde', e);
+    return false;
+  }
+}
+
+function fmt2(n){ return n.toString().padStart(2,'0'); }
+function teamById(id){ return TEAMS.find(t => t.id === id); }
+function teamName(id){ const t = teamById(id); return t ? t.name : id; }
+
+function addPoints(teamId, pts, note){
+  state.scores[teamId] = (state.scores[teamId] || 0) + pts;
+  if (!state.history) state.history = [];
+  state.history.unshift({team:teamId, points:pts, note:note || 'Points manuels', time:new Date().toISOString()});
+  state.history = state.history.slice(0, 40);
+}
+
+/* ---------- Rendu Accueil ---------- */
+function getPhase(){
+  const now = Date.now();
+  const launch = state.launchTime ? new Date(state.launchTime).getTime() : null;
+  const end = state.endTime ? new Date(state.endTime).getTime() : null;
+  if(launch && now < launch) return {phase:'before', target:launch};
+  if(end && now < end) return {phase:'during', target:end};
+  return {phase:'after', target:null};
+}
+
+const LOCKED_TABS = ['classement', 'defis', 'challenge'];
+
+function updateNavLock(){
+  const info = getPhase();
+  const locked = info.phase === 'before';
+  document.querySelectorAll('nav.tabs > button[data-tab]').forEach(btn => {
+    if(LOCKED_TABS.includes(btn.dataset.tab)){
+      btn.style.display = locked ? 'none' : '';
+      if(locked && btn.classList.contains('active')){
+        btn.classList.remove('active');
+        document.getElementById('panel-' + btn.dataset.tab).classList.remove('active');
+        document.querySelector('nav.tabs > button[data-tab="accueil"]').classList.add('active');
+        document.getElementById('panel-accueil').classList.add('active');
       }
-      state.challeng
+    }
+  });
+}
+
+function renderCountdown(){
+  const body = document.getElementById('countdown-body');
+  if(!state.launchTime){
+    body.innerHTML = '<p class="muted">La date de lancement n\'a pas encore ete fixee.</p>';
+    return;
+  }
+  const info = getPhase();
+  if(info.phase === 'after'){
+    body.innerHTML = '<div class="phase-tag after">TERMINE</div><p class="muted">Le jeu est termine, direction le classement final !</p>';
+    return;
+  }
+  const diff = info.target - Date.now();
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  const secs = Math.floor((diff % 60000) / 1000);
+  const tagClass = info.phase === 'before' ? 'before' : 'during';
+  const tagText = info.phase === 'before' ? 'A VENIR' : 'EN COURS';
+  const caption = info.phase === 'before' ? 'Debut dans' : 'Fin dans';
+  body.innerHTML = `
+    <div class="phase-tag ${tagClass}">${tagText}</div>
+    <p class="muted" style="margin-bottom:10px;">${caption}</p>
+    <div class="countdown">
+      <div class="unit"><div class="num">${days}</div><div class="lbl">JOURS</div></div>
+      <div class="unit"><div class="num">${fmt2(hours)}</div><div class="lbl">HEURES</div></div>
+      <div class="unit"><div class="num">${fmt2(mins)}</div><div class="lbl">MIN</div></div>
+      <div class="unit"><div class="num">${fmt2(secs)}</div><div class="lbl">SEC</div></div>
+    </div>`;
+}
+
+function renderRules(){
+  document.getElementById('rules-text').textContent = state.rules;
+}
+
+/* ---------- Classement (masque, sauf sa propre equipe) ---------- */
+function renderRanking(){
+  const sorted = TEAMS.map(t => ({...t, score: state.scores[t.id] || 0})).sort((a,b) => b.score - a.score);
+  document.getElementById('rank-list').innerHTML = sorted.map((t, i) => {
+    const isMine = t.id === myTeam;
+    const scoreDisplay = isMine ? `${t.score} pts` : '???';
+    return `
+    <div class="rank-row">
+      <div class="rank-pos">${i+1}</div>
+      <div class="rank-body">
+        <div class="rank-top"><span>${t.name}${isMine ? ' (vous)' : ''}</span><span class="rank-score">${scoreDisplay}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ---------- Votre equipe uniquement ---------- */
+function renderTeamsReadonly(){
+  const el = document.getElementById('teams-list');
+  if(!myTeam){ el.innerHTML = ''; return; }
+  const t = teamById(myTeam);
+  el.innerHTML = `
+    <div class="team-card" style="--team-color:${t.color};">
+      <div class="team-head">
+        <span class="team-name" style="color:${t.color};">${t.name}</span>
+        <span class="team-score">${state.scores[t.id] || 0}</span>
+      </div>
+    </div>`;
+}
+
+function renderHistoryList(targetId, limit, filterTeam){
+  const el = document.getElementById(targetId);
+  let items = state.history || [];
+  if(filterTeam){ items = items.filter(h => h.team === filterTeam); }
+  if(items.length === 0){
+    el.innerHTML = '<p class="muted">Aucun point marque pour le moment.</p>';
+    return;
+  }
+  el.innerHTML = items.slice(0, limit || 15).map(h => {
+    const d = new Date(h.time);
+    const timeStr = d.toLocaleDateString('fr-FR', {day:'2-digit', month:'2-digit'}) + ' ' + d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+    const sign = h.points > 0 ? '+' : '';
+    return `<div class="history-item"><span class="h-team">${teamName(h.team)} &middot; ${h.note}</span><span>${sign}${h.points} &middot; ${timeStr}</span></div>`;
+  }).join('');
+}
+
+/* ---------- Defis (joueurs, lecture) ---------- */
+function renderDefisReadonly(){
+  document.getElementById('defis-list').innerHTML = state.defis.map(d => {
+    const doneByMe = !!(myTeam && d.completedBy && d.completedBy[myTeam]);
+    const badgeClass = doneByMe ? 'done' : d.difficulty;
+    const badgeLabel = doneByMe ? 'Realise' : DIFF_LABEL[d.difficulty];
+    const statusLine = doneByMe ? 'Realise par votre equipe' : 'Disponible pour votre equipe';
+    return `
+      <div class="defi-row">
+        <div class="defi-top">
+          <span>${d.title}</span>
+          <span class="defi-pts">${d.points} pts</span>
+        </div>
+        <span class="badge ${badgeClass}">${badgeLabel}</span>
+        <div class="defi-status">${statusLine}</div>
+      </div>`;
+  }).join('');
+}
+
+function formatRemaining(ms){
+  if(ms <= 0) return '0 min';
+  const totalMin = Math.ceil(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? (h + 'h ' + m + 'min') : (m + ' min');
+}
+
+/* ---------- Challenges (joueurs, lecture) ---------- */
+function renderChallengesReadonly(){
+  const now = Date.now();
+  const visible = state.challenges.filter(c => new Date(c.revealAt).getTime() <= now)
+    .sort((a,b) => new Date(b.revealAt) - new Date(a.revealAt));
+  const el = document.getElementById('challenges-list');
+  if(visible.length === 0){
+    el.innerHTML = '<p class="muted">Aucun challenge disponible pour le moment. Reviens plus tard !</p>';
+    return;
+  }
+  el.innerHTML = visible.map(c => {
+    const myPts = myTeam ? (c.awardedPoints[myTeam] || 0) : 0;
+    const deadline = c.durationMinutes ? new Date(c.revealAt).getTime() + c.durationMinutes * 60000 : null;
+    const expired = deadline !== null && now > deadline && !c.finished;
+    let badgeClass, badgeLabel, statusLine;
+    if(c.finished){
+      badgeClass = 'done'; badgeLabel = 'Termine';
+      statusLine = myPts > 0 ? ('Termine - ' + myPts + ' pts pour votre equipe') : 'Termine - aucun point pour votre equipe';
+    } else if(expired){
+      badgeClass = 'done'; badgeLabel = 'Expire';
+      statusLine = 'Delai depasse pour votre equipe';
+    } else {
+      badgeClass = 'moyen'; badgeLabel = 'En cours';
+      statusLine = deadline ? ('En cours - il reste ' + formatRemaining(deadline - now)) : 'En cours';
+    }
+    return `
+      <div class="chal-row">
+        <div class="chal-top">
+          <span>${c.title}</span>
+          <span class="chal-pts">${c.points} pts</span>
+        </div>
+        <span class="badge ${badgeClass}">${badgeLabel}</span>
+        ${c.description ? `<div class="chal-desc">${c.description}</div>` : ''}
+        <div class="chal-status">${statusLine}</div>
+      </div>`;
+  }).join('');
+}
+
+/* ---------- Manche photo (joueurs) ---------- */
+function renderPlayerRace(){
+  const el = document.getElementById('race-section');
+  const active = (state.races || []).filter(r => r.active);
+  if(active.length === 0){
+    el.innerHTML = '';
+  } else {
+    el.innerHTML = active.map(r => `
+      <div class="card race-card">
+        <h2>Manche en cours</h2>
+        <p style="margin-bottom:8px;">Objet demande : <strong>${r.object}</strong></p>
+        <p class="muted">Envoyez votre photo le plus vite possible sur WhatsApp !</p>
+      </div>`).join('');
+  }
+  renderPlayerRaceHistory();
+}
+
+function renderPlayerRaceHistory(){
+  const el = document.getElementById('race-history-list');
+  if(!el) return;
+  if(!myTeam || !state.raceHistory || state.raceHistory.length === 0){
+    el.innerHTML = '<p class="muted">Aucune manche terminee pour le moment.</p>';
+    return;
+  }
+  const ptsMap = {1:10, 2:5, 3:0};
+  el.innerHTML = state.raceHistory.slice(0, 15).map(r => {
+    const d = new Date(r.finishedAt);
+    const dateStr = d.toLocaleDateString('fr-FR', {day:'2-digit', month:'2-digit'}) + ' ' + d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+    const place = r.placements[myTeam];
+    const label = place ? (place + (place===1?'er':'e') + ' - ' + ptsMap[place] + ' pts') : 'Non classe';
+    return `<div class="history-item"><span class="h-team">${r.object} &middot; ${dateStr}</span><span>${label}</span></div>`;
+  }).join('');
+}
+
+/* ---------- MJ : Points ---------- */
+function renderMjTeams(){
+  const container = document.getElementById('mj-teams-list');
+  container.innerHTML = TEAMS.map(t => `
+    <div class="team-card" style="--team-color:${t.color};">
+      <div class="team-head">
+        <span class="team-name" style="color:${t.color};">${t.name}</span>
+        <span class="team-score">${state.scores[t.id] || 0}</span>
+      </div>
+      <div class="btn-row">
+        <button class="pt" data-team="${t.id}" data-pts="1">+1</button>
+        <button class="pt" data-team="${t.id}" data-pts="5">+5</button>
+        <button class="pt" data-team="${t.id}" data-pts="10">+10</button>
+        <button class="pt minus" data-team="${t.id}" data-pts="-1">-1</button>
+      </div>
+      <div class="field-row" style="margin-top:8px;">
+        <input type="number" class="custom-pts-input" data-team="${t.id}" placeholder="+/- points libres">
+        <button class="pt custom-pts-btn" data-team="${t.id}">Appliquer</button>
+      </div>
+    </div>`).join('');
+
+  container.querySelectorAll('.pt[data-pts]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      addPoints(btn.dataset.team, parseInt(btn.dataset.pts, 10), 'Points manuels');
+      await saveState();
+      btn.disabled = false;
+    });
+  });
+
+  container.querySelectorAll('.custom-pts-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const teamId = btn.dataset.team;
+      const input = container.querySelector('.custom-pts-input[data-team="' + teamId + '"]');
+      const val = parseInt(input.value, 10);
+      if(!val){ return; }
+      btn.disabled = true;
+      addPoints(teamId, val, 'Points manuels');
+      await saveState();
+      btn.disabled = false;
+    });
+  });
+}
+
+/* ---------- MJ : Defis ---------- */
+function renderMjDefis(){
+  const el = document.getElementById('mj-defis-list');
+  el.innerHTML = state.defis.map(d => `
+    <div class="defi-row" data-id="${d.id}">
+      <div class="field-row" style="margin-bottom:8px;">
+        <input type="text" class="defi-title" value="${d.title.replace(/"/g,'&quot;')}">
+        <input type="number" class="defi-points" value="${d.points}">
+      </div>
+      <div class="field-row" style="margin-bottom:8px;">
+        <select class="defi-diff">
+          <option value="facile" ${d.difficulty==='facile'?'selected':''}>Facile</option>
+          <option value="moyen" ${d.difficulty==='moyen'?'selected':''}>Moyen</option>
+          <option value="difficile" ${d.difficulty==='difficile'?'selected':''}>Difficile</option>
+        </select>
+      </div>
+      <div class="btn-row">
+        ${TEAMS.map(t => `<label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;color:${t.color};margin:0;">
+          <input type="checkbox" class="defi-team-check" data-team="${t.id}" ${d.completedBy[t.id]?'checked':''}>${t.name}
+        </label>`).join('')}
+      </div>
+    </div>`).join('');
+
+  el.querySelectorAll('.defi-row').forEach(row => {
+    const id = row.dataset.id;
+    const titleInput = row.querySelector('.defi-title');
+    const pointsInput = row.querySelector('.defi-points');
+    const diffSelect = row.querySelector('.defi-diff');
+
+    async function saveDefiEdit(){
+      const d = state.defis.find(x => x.id === id);
+      d.title = titleInput.value;
+      d.points = parseInt(pointsInput.value, 10) || 0;
+      d.difficulty = diffSelect.value;
+      await saveState();
+    }
+    titleInput.addEventListener('change', saveDefiEdit);
+    pointsInput.addEventListener('change', saveDefiEdit);
+    diffSelect.addEventListener('change', saveDefiEdit);
+
+    row.querySelectorAll('.defi-team-check').forEach(chk => {
+      chk.addEventListener('change', async () => {
+        const d = state.defis.find(x => x.id === id);
+        const teamId = chk.dataset.team;
+        if(chk.checked){
+          d.completedBy[teamId] = true;
+          addPoints(teamId, d.points, 'Defi : ' + d.title);
+        } else {
+          d.completedBy[teamId] = false;
+          state.scores[teamId] = (state.scores[teamId] || 0) - d.points;
+        }
+        await saveState();
+      });
+    });
+  });
+}
+
+/* ---------- MJ : Challenges ---------- */
+function renderMjChallenges(){
+  const el = document.getElementById('mj-challenges-list');
+  if(state.challenges.length === 0){
+    el.innerHTML = '<p class="muted">Aucun challenge cree pour le moment.</p>';
+    return;
+  }
+  const sorted = [...state.challenges].sort((a,b) => new Date(a.revealAt) - new Date(b.revealAt));
+  el.innerHTML = sorted.map(c => `
+    <div class="chal-row" data-id="${c.id}">
+      <div class="field-row" style="margin-bottom:8px;">
+        <input type="text" class="chal-e-title" value="${c.title.replace(/"/g,'&quot;')}" ${c.finished?'disabled':''}>
+        <input type="number" class="chal-e-points" value="${c.points}" ${c.finished?'disabled':''}>
+      </div>
+      <span class="small-label">Apparition</span>
+      <input type="datetime-local" class="chal-e-reveal" value="${toLocalInputValue(c.revealAt)}" ${c.finished?'disabled':''}>
+      <span class="small-label">Delai en minutes (vide = illimite)</span>
+      <input type="number" class="chal-e-duration" value="${c.durationMinutes || ''}" ${c.finished?'disabled':''}>
+      <textarea class="chal-e-desc" style="min-height:60px;margin-top:8px;" ${c.finished?'disabled':''}>${c.description || ''}</textarea>
+      <p class="small-label" style="margin-top:10px;margin-bottom:4px;">Points attribues par equipe (saisie libre)</p>
+      <div class="btn-row">
+        ${TEAMS.map(t => `<div style="display:flex;align-items:center;gap:6px;">
+          <span style="color:${t.color};font-size:0.78rem;font-weight:600;">${t.name}</span>
+          <input type="number" class="chal-team-pts" data-team="${t.id}" value="${c.awardedPoints[t.id]}" style="width:64px;" ${c.finished?'disabled':''}>
+        </div>`).join('')}
+      </div>
+      <div class="btn-row" style="margin-top:10px;">
+        ${c.finished
+          ? '<span class="phase-tag after">TERMINE</span><button class="save-btn chal-reopen-btn">Rouvrir</button>'
+          : '<button class="save-btn chal-finish-btn">Terminer le challenge</button>'}
+        <button class="save-btn danger chal-e-delete">Supprimer</button>
+      </div>
+    </div>`).join('');
+
+  el.querySelectorAll('.chal-row').forEach(row => {
+    const id = row.dataset.id;
+    const titleInput = row.querySelector('.chal-e-title');
+    const pointsInput = row.querySelector('.chal-e-points');
+    const revealInput = row.querySelector('.chal-e-reveal');
+    const durationInput = row.querySelector('.chal-e-duration');
+    const descInput = row.querySelector('.chal-e-desc');
+    const deleteBtn = row.querySelector('.chal-e-delete');
+    const finishBtn = row.querySelector('.chal-finish-btn');
+    const reopenBtn = row.querySelector('.chal-reopen-btn');
+
+    async function saveChalEdit(){
+      const c = state.challenges.find(x => x.id === id);
+      c.title = titleInput.value;
+      c.points = parseInt(pointsInput.value, 10) || 0;
+      c.revealAt = new Date(revealInput.value).toISOString();
+      c.durationMinutes = durationInput.value ? parseInt(durationInput.value, 10) : null;
+      c.description = descInput.value;
+      await saveState();
+    }
+    titleInput.addEventListener('change', saveChalEdit);
+    pointsInput.addEventListener('change', saveChalEdit);
+    revealInput.addEventListener('change', saveChalEdit);
+    durationInput.addEventListener('change', saveChalEdit);
+    descInput.addEventListener('change', saveChalEdit);
+
+    row.querySelectorAll('.chal-team-pts').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const c = state.challenges.find(x => x.id === id);
+        const teamId = inp.dataset.team;
+        const newVal = parseInt(inp.value, 10) || 0;
+        const prevVal = c.awardedPoints[teamId] || 0;
+        const diff = newVal - prevVal;
+        if(diff !== 0){
+          addPoints(teamId, diff, 'Challenge : ' + c.title);
+        }
+        c.awardedPoints[teamId] = newVal;
+        await saveState();
+      });
+    });
+
+    if(finishBtn){
+      finishBtn.addEventListener('click', async () => {
+        const c = state.challenges.find(x => x.id === id);
+        c.finished = true;
+        await saveState();
+      });
+    }
+    if(reopenBtn){
+      reopenBtn.addEventListener('click', async () => {
+        const c = state.challenges.find(x => x.id === id);
+        c.finished = false;
+        await saveState();
+      });
+    }
+
+    deleteBtn.addEventListener('click', () => {
+      if(deleteBtn.dataset.confirm === '1'){
+        (async () => {
+          state.challenges = state.challenges.filter(x => x.id !== id);
+          await saveState();
+        })();
+      } else {
+        deleteBtn.dataset.confirm = '1';
+        deleteBtn.textContent = 'Confirmer la suppression';
+      }
+    });
+  });
+}
+
+/* ---------- MJ : manches photo (plusieurs simultanees) ---------- */
+function renderMjRaceRow(r){
+  if(!r.active){
+    const d = new Date(r.scheduledAt);
+    return `<div class="chal-row race-row" data-race-id="${r.id}">
+      <p class="muted" style="margin-bottom:10px;">Programmee pour le ${d.toLocaleString('fr-FR')} : <strong>${r.object}</strong></p>
+      <div class="btn-row">
+        <button class="save-btn race-launch-now-btn">Lancer maintenant</button>
+        <button class="save-btn danger race-cancel-btn">Annuler</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="chal-row race-row" data-race-id="${r.id}">
+    <p class="muted" style="margin-bottom:10px;">Objet : <strong>${r.object}</strong></p>
+    ${TEAMS.map(t => `
+      <div class="field-row" style="margin-bottom:8px;">
+        <span style="flex:1;color:${t.color};font-weight:600;">${t.name}</span>
+        <select class="race-place-select" data-team="${t.id}" style="flex:0 0 160px;">
+          <option value="">Non classe</option>
+          <option value="1" ${r.placements[t.id]===1?'selected':''}>1er - 10 pts</option>
+          <option value="2" ${r.placements[t.id]===2?'selected':''}>2e - 5 pts</option>
+          <option value="3" ${r.placements[t.id]===3?'selected':''}>3e - 0 pts</option>
+        </select>
+      </div>`).join('')}
+    <button class="save-btn race-finish-btn" style="margin-top:6px;">Terminer la manche</button>
+  </div>`;
+}
+
+function renderMjRace(){
+  const el = document.getElementById('mj-race-status');
+  if(!state.races || state.races.length === 0){
+    el.innerHTML = '<p class="muted">Aucune manche en cours.</p>';
+    renderMjRaceHistory();
+    return;
+  }
+
+  el.innerHTML = state.races.map(r => renderMjRaceRow(r)).join('');
+
+  state.races.forEach(r => {
+    const row = el.querySelector('.race-row[data-race-id="' + r.id + '"]');
+    if(!row) return;
+    if(!r.active){
+      row.querySelector('.race-launch-now-btn').addEventListener('click', async () => {
+        r.active = true;
+        r.startedAt = new Date().toISOString();
+        await saveState();
+      });
+      row.querySelector('.race-cancel-btn').addEventListener('click', async () => {
+        state.races = state.races.filter(x => x.id !== r.id);
+        await saveState();
+      });
+    } else {
+      row.querySelectorAll('.race-place-select').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          const teamId = sel.dataset.team;
+          const ptsMap = {1:10, 2:5, 3:0};
+          const newVal = sel.value ? parseInt(sel.value, 10) : null;
+          const prevVal = r.placements[teamId];
+          if(prevVal){ state.scores[teamId] = (state.scores[teamId] || 0) - ptsMap[prevVal]; }
+          r.placements[teamId] = newVal;
+          if(newVal){ addPoints(teamId, ptsMap[newVal], 'Manche photo : ' + r.object); }
+          await saveState();
+        });
+      });
+      row.querySelector('.race-finish-btn').addEventListener('click', async () => {
+        state.raceHistory = [{
+          object: r.object,
+          finishedAt: new Date().toISOString(),
+          placements: {...r.placements}
+        }, ...state.raceHistory].slice(0, 30);
+        state.races = state.races.filter(x => x.id !== r.id);
+        await saveState();
+      });
+    }
+  });
+
+  renderMjRaceHistory();
+}
+
+function renderMjRaceHistory(){
+  const el = document.getElementById('mj-race-history-list');
+  if(!el) return;
+  if(!state.raceHistory || state.raceHistory.length === 0){
+    el.innerHTML = '<p class="muted">Aucune manche terminee pour le moment.</p>';
+    return;
+  }
+  const ptsMap = {1:10, 2:5, 3:0};
+  el.innerHTML = state.raceHistory.slice(0, 10).map(r => {
+    const d = new Date(r.finishedAt);
+    const dateStr = d.toLocaleDateString('fr-FR', {day:'2-digit', month:'2-digit'}) + ' ' + d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+    const lines = TEAMS.map(t => {
+      const place = r.placements[t.id];
+      const label = place ? (place + (place===1?'er':'e') + ' - ' + ptsMap[place] + ' pts') : 'Non classe';
+      return `<div class="history-item"><span class="h-team" style="color:${t.color};">${t.name}</span><span>${label}</span></div>`;
+    }).join('');
+    return `<div style="margin-bottom:12px;"><p class="muted" style="margin-bottom:4px;">${r.object} &middot; ${dateStr}</p>${lines}</div>`;
+  }).join('');
+}
+
+function setupRaceHandlers(){
+  document.getElementById('race-launch-btn').addEventListener('click', async () => {
+    const obj = document.getElementById('race-object').value.trim();
+    if(!obj) return;
+    const scheduleVal = document.getElementById('race-schedule').value;
+    const newRace = {
+      id: 'r' + Date.now() + Math.random().toString(36).slice(2, 6),
+      object: obj,
+      placements: {vert:null, violet:null, orange:null}
+    };
+    if(scheduleVal && new Date(scheduleVal).getTime() > Date.now()){
+      newRace.active = false;
+      newRace.startedAt = null;
+      newRace.scheduledAt = new Date(scheduleVal).toISOString();
+    } else {
+      newRace.active = true;
+      newRace.startedAt = new Date().toISOString();
+      newRace.scheduledAt = null;
+    }
+    state.races.push(newRace);
+    await saveState();
+    document.getElementById('race-object').value = '';
+    document.getElementById('race-schedule').value = '';
+  });
+}
+
+function toLocalInputValue(isoString){
+  const d = new Date(isoString);
+  const pad = n => n.toString().padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/* ---------- MJ : Reglages ---------- */
+function renderMjSettingsForm(){
+  document.getElementById('launch-input').value = state.launchTime ? toLocalInputValue(state.launchTime) : '';
+  document.getElementById('end-input').value = state.endTime ? toLocalInputValue(state.endTime) : '';
+  document.getElementById('rules-input').value = state.rules;
+  document.getElementById('code-vert').value = state.teamCodes.vert;
+  document.getElementById('code-violet').value = state.teamCodes.violet;
+  document.getElementById('code-orange').value = state.teamCodes.orange;
+}
+
+function setupMjSettings(){
+  document.getElementById('save-settings').addEventListener('click', async () => {
+    const statusEl = document.getElementById('settings-status');
+    const launchVal = document.getElementById('launch-input').value;
+    const endVal = document.getElementById('end-input').value;
+    const rulesVal = document.getElementById('rules-input').value;
+    if(launchVal) state.launchTime = new Date(launchVal).toISOString();
+    if(endVal) state.endTime = new Date(endVal).toISOString();
+    state.rules = rulesVal || state.rules;
+    const ok = await saveState();
+    statusEl.textContent = ok ? 'Enregistre !' : "Erreur, reessaie.";
+    statusEl.className = 'status-msg ' + (ok ? 'ok' : 'err');
+    setTimeout(() => { statusEl.textContent=''; }, 3000);
+  });
+
+  document.getElementById('pin-save-btn').addEventListener('click', async () => {
+    const statusEl = document.getElementById('pin-status');
+    const val = document.getElementById('pin-input').value.trim();
+    if(val.length < 4 || val.length > 8){
+      statusEl.textContent = 'Le code doit faire entre 4 et 8 caracteres.';
+      statusEl.className = 'status-msg err';
+      return;
+    }
+    state.mjPin = val;
+    const ok = await saveState();
+    statusEl.textContent = ok ? 'Code mis a jour.' : 'Erreur, reessaie.';
+    statusEl.className = 'status-msg ' + (ok ? 'ok' : 'err');
+    document.getElementById('pin-input').value = '';
+    setTimeout(() => { statusEl.textContent=''; }, 3000);
+  });
+
+  document.getElementById('codes-save-btn').addEventListener('click', async () => {
+    const statusEl = document.getElementById('codes-status');
+    state.teamCodes = {
+      vert: document.getElementById('code-vert').value.trim() || state.teamCodes.vert,
+      violet: document.getElementById('code-violet').value.trim() || state.teamCodes.violet,
+      orange: document.getElementById('code-orange').value.trim() || state.teamCodes.orange
+    };
+    const ok = await saveState();
+    statusEl.textContent = ok ? 'Codes enregistres.' : 'Erreur, reessaie.';
+    statusEl.className = 'status-msg ' + (ok ? 'ok' : 'err');
+    setTimeout(() => { statusEl.textContent=''; }, 3000);
+  });
+
+  document.getElementById('reset-scores').addEventListener('click', async () => {
+    const statusEl = document.getElementById('reset-status');
+    state.scores = {vert:0, violet:0, orange:0};
+    state.history = [];
+    state.defis = generateDefaultDefis();
+    state.challenges.forEach(c => { c.awardedPoints = {vert:0, violet:0, orange:0}; c.finished = false; });
+    state.races = [];
+    state.raceHistory = [];
+    const ok = await saveState();
+    statusEl.textContent = ok ? 'Partie reinitialisee.' : 'Erreur, reessaie.';
+    statusEl.className = 'status-msg ' + (ok ? 'ok' : 'err');
+    setTimeout(() => { statusEl.textContent=''; }, 3000);
+  });
+
+  document.getElementById('chal-add-btn').addEventListener('click', async () => {
+    const statusEl = document.getElementById('chal-add-status');
+    const title = document.getElementById('chal-title').value.trim();
+    const desc = document.getElementById('chal-desc').value.trim();
+    const points = parseInt(document.getElementById('chal-points').value, 10) || 0;
+    const revealVal = document.getElementById('chal-reveal').value;
+    const durationVal = document.getElementById('chal-duration').value;
+    if(!title || !revealVal){
+      statusEl.textContent = 'Titre et date requis.';
+      statusEl.className = 'status-msg err';
+      return;
+    }
+    state.challenges.push({
+      id: 'c' + Date.now(),
+      title, description: desc, points,
+      revealAt: new Date(revealVal).toISOString(),
+      durationMinutes: durationVal ? parseInt(durationVal, 10) : null,
+      awardedPoints: {vert:0, violet:0, orange:0},
+      finished: false
+    });
+    const ok = await saveState();
+    if(ok){
+      document.getElementById('chal-title').value = '';
+      document.getElementById('chal-desc').value = '';
+      document.getElementById('chal-points').value = '20';
+      document.getElementById('chal-reveal').value = '';
+      document.getElementById('chal-duration').value = '';
+      statusEl.textContent = 'Challenge ajoute !';
+      statusEl.className = 'status-msg ok';
+    } else {
+      statusEl.textContent = 'Erreur, reessaie.';
+      statusEl.className = 'status-msg err';
+    }
+    setTimeout(() => { statusEl.textContent=''; }, 3000);
+  });
+}
+
+function playAlertSound(){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.frequency.value = 880;
+    o.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(0.15, ctx.currentTime);
+    o.start();
+    o.stop(ctx.currentTime + 0.3);
+  }catch(e){ /* audio non disponible, tant pis */ }
+}
+
+function flashTitle(msg){
+  const original = 'Le Grand Jeu QG';
+  let count = 0;
+  const interval = setInterval(() => {
+    document.title = (count % 2 === 0) ? msg : original;
+    count++;
+    if(count > 8){ clearInterval(interval); document.title = original; }
+  }, 700);
+}
+
+function checkForAlerts(){
+  const now = Date.now();
+
+  let anyActivated = false;
+  (state.races || []).forEach(r => {
+    if(!r.active && r.scheduledAt && new Date(r.scheduledAt).getTime() <= now){
+      r.active = true;
+      r.startedAt = new Date().toISOString();
+      anyActivated = true;
+    }
+  });
+  if(anyActivated) saveState();
+
+  const visibleIds = state.challenges.filter(c => new Date(c.revealAt).getTime() <= now).map(c => c.id);
+  if(knownChallengeIds === null){
+    knownChallengeIds = new Set(visibleIds);
+  } else {
+    const newOnes = visibleIds.filter(id => !knownChallengeIds.has(id));
+    if(newOnes.length > 0){
+      flashTitle('Nouveau challenge !');
+      playAlertSound();
+    }
+    knownChallengeIds = new Set(visibleIds);
+  }
+
+  const activeRaceIds = (state.races || []).filter(r => r.active).map(r => r.id);
+  if(knownActiveRaceIds === null){
+    knownActiveRaceIds = new Set(activeRaceIds);
+  } else {
+    const newRaces = activeRaceIds.filter(id => !knownActiveRaceIds.has(id));
+    if(newRaces.length > 0){
+      flashTitle('Manche photo !');
+      playAlertSound();
+    }
+    knownActiveRaceIds = new Set(activeRaceIds);
+  }
+}
+
+/* ---------- Rendu global ---------- */
+function refreshAllViews(){
+  renderCountdown();
+  updateNavLock();
+  updateTeamGate();
+  renderRules();
+  renderRanking();
+  renderTeamsReadonly();
+  renderHistoryList('history-list', 15, myTeam);
+  renderDefisReadonly();
+  renderChallengesReadonly();
+  renderPlayerRace();
+  if(mjUnlocked){
+    renderMjTeams();
+    renderHistoryList('mj-history-list', 25);
+    renderMjDefis();
+    renderMjChallenges();
+    renderMjSettingsForm();
+    renderMjRace();
+  }
+}
+
+const GATED_TABS = ['classement', 'defis', 'challenge'];
+
+function updateTeamGate(){
+  const activeBtn = document.querySelector('nav.tabs > button.active[data-tab]');
+  const activeTab = activeBtn ? activeBtn.dataset.tab : 'accueil';
+  const gate = document.getElementById('team-gate-card');
+  const needsGate = myTeam === null && GATED_TABS.includes(activeTab);
+  gate.style.display = needsGate ? 'block' : 'none';
+  const panel = document.getElementById('panel-' + activeTab);
+  if(panel) panel.style.display = needsGate ? 'none' : '';
+}
+
+function setupTeamGate(){
+  document.getElementById('gate-join-btn').addEventListener('click', () => {
+    const teamId = document.getElementById('gate-team-select').value;
+    const code = document.getElementById('gate-team-code').value.trim();
+    const errorEl = document.getElementById('gate-join-error');
+    if(state.teamCodes[teamId] && code === state.teamCodes[teamId]){
+      myTeam = teamId;
+      localStorage.setItem('myTeam', myTeam);
+      updateTeamGate();
+      refreshAllViews();
+    } else {
+      errorEl.textContent = 'Code incorrect pour cette equipe.';
+    }
+  });
+}
+
+/* ---------- Navigation joueurs ---------- */
+function setupTabs(){
+  document.querySelectorAll('nav.tabs > button[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('nav.tabs > button[data-tab]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.app > main > .panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+      updateTeamGate();
+    });
+  });
+}
+
+/* ---------- Navigation MJ ---------- */
+function setupMjTabs(){
+  document.querySelectorAll('#mj-overlay button[data-mjtab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#mj-overlay button[data-mjtab]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('#mj-overlay .panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('mjpanel-' + btn.dataset.mjtab).classList.add('active');
+    });
+  });
+}
+
+/* ---------- Verrou MJ ---------- */
+function setupMjLock(){
+  const gearBtn = document.getElementById('mj-gear-btn');
+  const modal = document.getElementById('pin-modal');
+  const overlay = document.getElementById('mj-overlay');
+  const attemptInput = document.getElementById('pin-attempt');
+  const errorEl = document.getElementById('pin-error');
+
+  gearBtn.addEventListener('click', () => {
+    if(mjUnlocked){
+      overlay.classList.add('open');
+      refreshAllViews();
+    } else {
+      errorEl.textContent = '';
+      attemptInput.value = '';
+      modal.classList.add('open');
+      attemptInput.focus();
+    }
+  });
+
+  document.getElementById('pin-cancel-btn').addEventListener('click', () => {
+    modal.classList.remove('open');
+  });
+
+  document.getElementById('pin-submit-btn').addEventListener('click', () => {
+    if(attemptInput.value === state.mjPin){
+      mjUnlocked = true;
+      modal.classList.remove('open');
+      overlay.classList.add('open');
+      refreshAllViews();
+    } else {
+      errorEl.textContent = 'Code incorrect.';
+    }
+  });
+  attemptInput.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter') document.getElementById('pin-submit-btn').click();
+  });
+
+  document.getElementById('mj-close-btn').addEventListener('click', () => {
+    overlay.classList.remove('open');
+  });
+}
+
+function init(){
+  setupTabs();
+  setupMjTabs();
+  setupMjLock();
+  setupMjSettings();
+  setupRaceHandlers();
+  setupTeamGate();
+  
+  countdownTimer = setInterval(() => { renderCountdown(); updateNavLock(); }, 1000);
+}
+
+init();
+</script>
+</body>
+</html>
