@@ -454,11 +454,19 @@ stateRef.on('value', (snapshot) => {
       state.defis = migrateDefis(state.defis);
     }
     state.challenges = migrateChallenges(state.challenges || []);
+    
+    // FIX FIREBASE (remplace les null supprimés par des 0)
     if(!Array.isArray(state.raceHistory)) state.raceHistory = [];
+    state.raceHistory.forEach(r => {
+      if(!r.placements) r.placements = {vert: 0, violet: 0, orange: 0};
+    });
+
     if(!Array.isArray(state.races)) state.races = [];
+    state.races.forEach(r => {
+      if(!r.placements) r.placements = {vert: 0, violet: 0, orange: 0};
+    });
 
   } else {
-    // Si la base est vide (premier lancement), on la crée
     stateRef.set(state);
   }
 
@@ -469,7 +477,6 @@ stateRef.on('value', (snapshot) => {
     checkForAlerts();
     refreshAllViews();
   } else {
-    // Évite de rafraîchir l'écran du MJ pendant qu'il tape du texte
     const active = document.activeElement;
     const isEditing = active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName);
     if(!isEditing) {
@@ -733,6 +740,7 @@ function renderMjTeams(){
       btn.disabled = true;
       addPoints(btn.dataset.team, parseInt(btn.dataset.pts, 10), 'Points manuels');
       await saveState();
+      refreshAllViews();
       btn.disabled = false;
     });
   });
@@ -746,6 +754,7 @@ function renderMjTeams(){
       btn.disabled = true;
       addPoints(teamId, val, 'Points manuels');
       await saveState();
+      refreshAllViews();
       btn.disabled = false;
     });
   });
@@ -803,6 +812,7 @@ function renderMjDefis(){
           state.scores[teamId] = (state.scores[teamId] || 0) - d.points;
         }
         await saveState();
+        refreshAllViews();
       });
     });
   });
@@ -880,6 +890,7 @@ function renderMjChallenges(){
         }
         c.awardedPoints[teamId] = newVal;
         await saveState();
+        refreshAllViews();
       });
     });
 
@@ -888,6 +899,7 @@ function renderMjChallenges(){
         const c = state.challenges.find(x => x.id === id);
         c.finished = true;
         await saveState();
+        refreshAllViews();
       });
     }
     if(reopenBtn){
@@ -895,6 +907,7 @@ function renderMjChallenges(){
         const c = state.challenges.find(x => x.id === id);
         c.finished = false;
         await saveState();
+        refreshAllViews();
       });
     }
 
@@ -903,6 +916,7 @@ function renderMjChallenges(){
         (async () => {
           state.challenges = state.challenges.filter(x => x.id !== id);
           await saveState();
+          refreshAllViews();
         })();
       } else {
         deleteBtn.dataset.confirm = '1';
@@ -912,7 +926,7 @@ function renderMjChallenges(){
   });
 }
 
-/* ---------- MJ : manches photo (plusieurs simultanees) ---------- */
+/* ---------- MJ : manches photo ---------- */
 function renderMjRaceRow(r){
   if(!r.active){
     const d = new Date(r.scheduledAt);
@@ -930,7 +944,7 @@ function renderMjRaceRow(r){
       <div class="field-row" style="margin-bottom:8px;">
         <span style="flex:1;color:${t.color};font-weight:600;">${t.name}</span>
         <select class="race-place-select" data-team="${t.id}" style="flex:0 0 160px;">
-          <option value="">Non classe</option>
+          <option value="0">Non classe</option>
           <option value="1" ${r.placements[t.id]===1?'selected':''}>1er - 10 pts</option>
           <option value="2" ${r.placements[t.id]===2?'selected':''}>2e - 5 pts</option>
           <option value="3" ${r.placements[t.id]===3?'selected':''}>3e - 0 pts</option>
@@ -958,24 +972,35 @@ function renderMjRace(){
         r.active = true;
         r.startedAt = new Date().toISOString();
         await saveState();
+        refreshAllViews();
       });
       row.querySelector('.race-cancel-btn').addEventListener('click', async () => {
         state.races = state.races.filter(x => x.id !== r.id);
         await saveState();
+        refreshAllViews();
       });
     } else {
       row.querySelectorAll('.race-place-select').forEach(sel => {
         sel.addEventListener('change', async () => {
           const teamId = sel.dataset.team;
           const ptsMap = {1:10, 2:5, 3:0};
-          const newVal = sel.value ? parseInt(sel.value, 10) : null;
+          const newVal = parseInt(sel.value, 10) || 0;
           const prevVal = r.placements[teamId];
-          if(prevVal){ state.scores[teamId] = (state.scores[teamId] || 0) - ptsMap[prevVal]; }
+          
+          if(prevVal && ptsMap[prevVal] !== undefined){ 
+              state.scores[teamId] = (state.scores[teamId] || 0) - ptsMap[prevVal]; 
+          }
+          
           r.placements[teamId] = newVal;
-          if(newVal){ addPoints(teamId, ptsMap[newVal], 'Manche photo : ' + r.object); }
+          
+          if(newVal && ptsMap[newVal] !== undefined){ 
+              addPoints(teamId, ptsMap[newVal], 'Manche photo : ' + r.object); 
+          }
           await saveState();
+          refreshAllViews();
         });
       });
+      
       row.querySelector('.race-finish-btn').addEventListener('click', async () => {
         state.raceHistory = [{
           object: r.object,
@@ -984,6 +1009,7 @@ function renderMjRace(){
         }, ...state.raceHistory].slice(0, 30);
         state.races = state.races.filter(x => x.id !== r.id);
         await saveState();
+        refreshAllViews();
       });
     }
   });
@@ -1019,7 +1045,7 @@ function setupRaceHandlers(){
     const newRace = {
       id: 'r' + Date.now() + Math.random().toString(36).slice(2, 6),
       object: obj,
-      placements: {vert:null, violet:null, orange:null}
+      placements: {vert:0, violet:0, orange:0}
     };
     if(scheduleVal && new Date(scheduleVal).getTime() > Date.now()){
       newRace.active = false;
@@ -1034,6 +1060,7 @@ function setupRaceHandlers(){
     await saveState();
     document.getElementById('race-object').value = '';
     document.getElementById('race-schedule').value = '';
+    refreshAllViews();
   });
 }
 
@@ -1108,6 +1135,7 @@ function setupMjSettings(){
     const ok = await saveState();
     statusEl.textContent = ok ? 'Partie reinitialisee.' : 'Erreur, reessaie.';
     statusEl.className = 'status-msg ' + (ok ? 'ok' : 'err');
+    refreshAllViews();
     setTimeout(() => { statusEl.textContent=''; }, 3000);
   });
 
@@ -1140,6 +1168,7 @@ function setupMjSettings(){
       document.getElementById('chal-duration').value = '';
       statusEl.textContent = 'Challenge ajoute !';
       statusEl.className = 'status-msg ok';
+      refreshAllViews();
     } else {
       statusEl.textContent = 'Erreur, reessaie.';
       statusEl.className = 'status-msg err';
